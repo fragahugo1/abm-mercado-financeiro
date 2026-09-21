@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "abm-mercado-financeiro"
+version = "0.1.0"
+description = "Mercado artificial com agentes fundamentalistas e chartistas."
+requires-python = ">=3.11"
+dependencies = [
+    "mercadolab @ git+https://github.com/Hargenx/mercadolab.git",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+abm-mercado-financeiro = "abm_mercado_financeiro.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/abm_mercado_financeiro"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q -p no:cacheprovider"
