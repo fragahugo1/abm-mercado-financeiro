@@ -25,6 +25,8 @@ class AgenteBase(ABC):
         nome: str,
         saldo: Decimal,
         quantidade_ativo: int = 0,
+        ajuste_preco_limite: Decimal = Decimal("0.01"),
+        quantidade_maxima_ordem: int = 5,
     ) -> None:
         if id < 0:
             raise ValueError("id deve ser não negativo.")
@@ -34,7 +36,13 @@ class AgenteBase(ABC):
             raise ValueError("saldo não pode ser negativo.")
         if quantidade_ativo < 0:
             raise ValueError("quantidade_ativo não pode ser negativa.")
+        if ajuste_preco_limite <= 0:
+            raise ValueError("ajuste_preco_limite deve ser positivo.")
+        if quantidade_maxima_ordem < 1:
+            raise ValueError("quantidade_maxima_ordem deve ser pelo menos 1.")
 
+        self.ajuste_preco_limite = ajuste_preco_limite
+        self.quantidade_maxima_ordem = quantidade_maxima_ordem
         self.id = id
         self.nome = nome
         self.investidor = Investidor(nome=nome)
@@ -60,6 +68,8 @@ class AgenteBase(ABC):
         return self.saldo + self.valor_posicao(preco_atual)
 
     def vincular_ativo(self, ativo: Ativo) -> None:
+        if not ativo.validar_preco(self.ajuste_preco_limite):
+            raise ValueError("ajuste_preco_limite deve ser múltiplo do tick size do ativo.")
         self._ativo = ativo
         if self._quantidade_ativo_inicial:
             from mercadolab.api.posicao import Posicao
@@ -83,6 +93,7 @@ class AgenteBase(ABC):
             return None
 
         lado, quantidade = decisao
+        quantidade = min(quantidade, self.quantidade_maxima_ordem)
         if lado is LadoOrdem.COMPRA:
             quantidade = min(quantidade, int(self.saldo // preco_atual))
         else:
@@ -90,7 +101,7 @@ class AgenteBase(ABC):
         if quantidade <= 0:
             return None
 
-        ajuste = Decimal("0.01")
+        ajuste = self.ajuste_preco_limite
         preco_limite = preco_atual + ajuste if lado is LadoOrdem.COMPRA else max(ajuste, preco_atual - ajuste)
         return self.investidor.emitir_ordem(
             ativo=ativo,
@@ -122,14 +133,26 @@ class AgenteFundamentalista(AgenteBase):
         valor_fundamental: Decimal,
         quantidade_ativo: int = 0,
         custo_informacao: Decimal = Decimal("0.00"),
+        tolerancia: Decimal = Decimal("0.02"),
+        passo_quantidade: Decimal = Decimal("2"),
+        ajuste_preco_limite: Decimal = Decimal("0.01"),
+        quantidade_maxima_ordem: int = 5,
     ) -> None:
-        super().__init__(id, nome, saldo, quantidade_ativo)
+        super().__init__(
+            id, nome, saldo, quantidade_ativo, ajuste_preco_limite, quantidade_maxima_ordem
+        )
+        if tolerancia < 0:
+            raise ValueError("tolerancia não pode ser negativa.")
+        if passo_quantidade <= 0:
+            raise ValueError("passo_quantidade deve ser positivo.")
         if valor_fundamental <= 0:
             raise ValueError("valor_fundamental deve ser positivo.")
         if custo_informacao < 0:
             raise ValueError("custo_informacao não pode ser negativo.")
         self.valor_fundamental = valor_fundamental
         self.custo_informacao = custo_informacao
+        self.tolerancia = tolerancia
+        self.passo_quantidade = passo_quantidade
 
     def pagar_custo_informacao(self) -> None:
         self.investidor.carteira.caixa = max(
@@ -139,9 +162,9 @@ class AgenteFundamentalista(AgenteBase):
 
     def decidir_lado(self, preco_atual, historico_precos, rng):
         diferenca = self.valor_fundamental - preco_atual
-        if abs(diferenca) < Decimal("0.02"):
+        if abs(diferenca) < self.tolerancia:
             return None
-        quantidade = max(1, min(5, int(abs(diferenca) // Decimal("2")) + 1))
+        quantidade = int(abs(diferenca) // self.passo_quantidade) + 1
         return (LadoOrdem.COMPRA if diferenca > 0 else LadoOrdem.VENDA, quantidade)
 
 
@@ -158,8 +181,15 @@ class AgenteChartista(AgenteBase):
         sensibilidade: Decimal = Decimal("1.00"),
         probabilidade_inicial: Decimal = Decimal("1.00"),
         probabilidade_reversao: Decimal = Decimal("0.50"),
+        quantidade_sem_tendencia: int = 1,
+        ajuste_preco_limite: Decimal = Decimal("0.01"),
+        quantidade_maxima_ordem: int = 5,
     ) -> None:
-        super().__init__(id, nome, saldo, quantidade_ativo)
+        super().__init__(
+            id, nome, saldo, quantidade_ativo, ajuste_preco_limite, quantidade_maxima_ordem
+        )
+        if quantidade_sem_tendencia < 1:
+            raise ValueError("quantidade_sem_tendencia deve ser pelo menos 1.")
         if janela < 2:
             raise ValueError("janela deve ser pelo menos 2.")
         if not Decimal("0") <= probabilidade_inicial <= Decimal("1"):
@@ -170,19 +200,20 @@ class AgenteChartista(AgenteBase):
         self.sensibilidade = sensibilidade
         self.probabilidade_inicial = probabilidade_inicial
         self.probabilidade_reversao = probabilidade_reversao
+        self.quantidade_sem_tendencia = quantidade_sem_tendencia
 
     def decidir_lado(self, preco_atual, historico_precos, rng):
         if len(historico_precos) < 2:
             if rng.random() >= float(self.probabilidade_inicial):
                 return None
             lado = LadoOrdem.COMPRA if rng.random() < 0.5 else LadoOrdem.VENDA
-            return lado, 1
+            return lado, self.quantidade_sem_tendencia
         inicio = historico_precos[-self.janela] if len(historico_precos) >= self.janela else historico_precos[0]
         tendencia = preco_atual - inicio
         if tendencia == 0:
             lado = LadoOrdem.COMPRA if rng.random() < 0.5 else LadoOrdem.VENDA
-            return lado, 1
+            return lado, self.quantidade_sem_tendencia
         if rng.random() < float(self.probabilidade_reversao):
             tendencia = -tendencia
-        quantidade = max(1, min(5, int(abs(tendencia) * self.sensibilidade) + 1))
+        quantidade = int(abs(tendencia) * self.sensibilidade) + 1
         return (LadoOrdem.COMPRA if tendencia > 0 else LadoOrdem.VENDA, quantidade)

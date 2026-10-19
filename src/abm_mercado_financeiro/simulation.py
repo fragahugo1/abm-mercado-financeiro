@@ -15,8 +15,8 @@ from .agents import AgenteBase, AgenteFundamentalista
 
 @dataclass(frozen=True)
 class ConfiguracaoSimulacao:
-    quantidade_ticks: int = 20
-    semente: int = 42
+    quantidade_ticks: int
+    semente: int
 
     def __post_init__(self) -> None:
         if self.quantidade_ticks <= 0:
@@ -90,15 +90,31 @@ class SimulacaoMercadoArtificial:
         return resultados
 
     def resumo_tick(self, tick: int, transacoes: tuple[Transacao, ...] = ()) -> str:
+        largura_nome = max(len(agente.nome) for agente in self.agentes)
+        colunas = (
+            f"{'Agente':<{largura_nome}} | {'Caixa':>10} | {'Ações':>6} | "
+            f"{'Valor em Ações':>14} | {'Patrimônio':>10}"
+        )
+        largura = len(colunas)
         linhas = [
-            f"TICK {tick}: Preco da Acao = {self.preco_atual:.2f} | "
-            f"Transacoes = {len(transacoes)}"
+            "=" * largura,
+            f"TICK {tick}  |  Preço da Ação: {self.preco_atual:.2f}  |  "
+            f"Transações: {len(transacoes)}",
+            "=" * largura,
         ]
+
+        grupos: dict[str, list[AgenteBase]] = {}
         for agente in self.agentes:
-            linhas.append(
-                f"{agente.nome} | Caixa = {agente.saldo:.2f} | "
-                f"Ações = {agente.quantidade_ativo} | "
-                f"Valor da Posicao = {agente.valor_posicao(self.preco_atual):.2f} | "
-                f"Patrimonio Total = {agente.patrimonio(self.preco_atual):.2f}"
-            )
+            grupos.setdefault(agente.tipo, []).append(agente)
+
+        for agentes_grupo in grupos.values():
+            titulo = f"{agentes_grupo[0].tipo.upper()}S ({len(agentes_grupo)})"
+            linhas.extend(["", titulo, colunas, "-" * largura])
+            for agente in agentes_grupo:
+                linhas.append(
+                    f"{agente.nome:<{largura_nome}} | {agente.saldo:>10.2f} | "
+                    f"{agente.quantidade_ativo:>6} | "
+                    f"{agente.valor_posicao(self.preco_atual):>14.2f} | "
+                    f"{agente.patrimonio(self.preco_atual):>10.2f}"
+                )
         return "\n".join(linhas)
