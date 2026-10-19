@@ -9,6 +9,7 @@ description = "Mercado artificial com agentes fundamentalistas e chartistas."
 requires-python = ">=3.11"
 dependencies = [
     "mercadolab @ git+https://github.com/Hargenx/mercadolab.git",
+    "matplotlib>=3.7",
 ]
 
 [tool.hatch.metadata]
