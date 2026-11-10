@@ -83,7 +83,7 @@ def test_resumo_separa_agentes_por_estrategia() -> None:
     assert resumo.index("FUNDAMENTALISTAS") < resumo.index("CHARTISTAS")
 
 
-def test_ordem_respeita_quantidade_maxima_e_ajuste_configurados() -> None:
+def test_ordem_respeita_quantidade_maxima_configurada() -> None:
     agente = AgenteFundamentalista(
         0,
         "Fundamentalista",
@@ -100,4 +100,49 @@ def test_ordem_respeita_quantidade_maxima_e_ajuste_configurados() -> None:
 
     assert ordem is not None
     assert ordem.quantidade == 2
-    assert ordem.preco_limite == Decimal("4.05")
+    assert ordem.preco_limite == Decimal("7.60")
+
+
+def test_preco_ordem_fundamentalista_depende_da_distancia_ao_valor_justo() -> None:
+    agente = AgenteFundamentalista(
+        0,
+        "Fundamentalista",
+        Decimal("100"),
+        Decimal("4.40"),
+        quantidade_ativo=5,
+        tolerancia=Decimal("0.05"),
+    )
+    ativo = Ativo(ticker="FUND", tipo=TipoAtivo.ACAO)
+
+    ordem = agente.gerar_ordem(
+        ativo, Tempo(tick=0), Decimal("4.10"), [Decimal("4.10")], Random(1)
+    )
+
+    assert ordem is not None
+    assert ordem.preco_limite == Decimal("4.13")
+
+
+def test_preco_ordem_chartista_depende_da_tendencia_e_sensibilidade() -> None:
+    ativo = Ativo(ticker="CHART", tipo=TipoAtivo.ACAO)
+    historico = [Decimal("4.00"), Decimal("4.10")]
+    ordens = []
+    for indice, sensibilidade in enumerate((Decimal("0.50"), Decimal("1.50"))):
+        agente = AgenteChartista(
+            indice,
+            f"Chartista {indice}",
+            Decimal("100"),
+            quantidade_ativo=5,
+            janela=2,
+            sensibilidade=sensibilidade,
+            probabilidade_reversao=Decimal("0"),
+        )
+        ordem = agente.gerar_ordem(
+            ativo, Tempo(tick=1), Decimal("4.10"), historico, Random(1)
+        )
+        assert ordem is not None
+        ordens.append(ordem)
+
+    assert [ordem.preco_limite for ordem in ordens] == [
+        Decimal("4.15"),
+        Decimal("4.25"),
+    ]

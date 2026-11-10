@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from random import Random
 from typing import TYPE_CHECKING
 
@@ -101,8 +101,9 @@ class AgenteBase(ABC):
         if quantidade <= 0:
             return None
 
-        ajuste = self.ajuste_preco_limite
-        preco_limite = preco_atual + ajuste if lado is LadoOrdem.COMPRA else max(ajuste, preco_atual - ajuste)
+        preco_limite = self.calcular_preco_limite(
+            lado, ativo, preco_atual, historico_precos
+        )
         return self.investidor.emitir_ordem(
             ativo=ativo,
             lado=lado,
@@ -111,6 +112,28 @@ class AgenteBase(ABC):
             tempo=tempo,
             preco_limite=preco_limite,
         )
+
+    def calcular_preco_limite(
+        self,
+        lado: LadoOrdem,
+        ativo: Ativo,
+        preco_atual: Decimal,
+        historico_precos: Sequence[Decimal],
+    ) -> Decimal:
+        ajuste = self.ajuste_preco_limite
+        preco = (
+            preco_atual + ajuste
+            if lado is LadoOrdem.COMPRA
+            else max(ajuste, preco_atual - ajuste)
+        )
+        return self._arredondar_preco(preco, ativo)
+
+    @staticmethod
+    def _arredondar_preco(preco: Decimal, ativo: Ativo) -> Decimal:
+        quantidade_ticks = (preco / ativo.tick_size).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+        return max(ativo.tick_size, quantidade_ticks * ativo.tick_size)
 
     @abstractmethod
     def decidir_lado(
@@ -135,6 +158,7 @@ class AgenteFundamentalista(AgenteBase):
         custo_informacao: Decimal = Decimal("0.00"),
         tolerancia: Decimal = Decimal("0.02"),
         passo_quantidade: Decimal = Decimal("2"),
+        fracao_ajuste_fundamentalista: Decimal = Decimal("0.10"),
         ajuste_preco_limite: Decimal = Decimal("0.01"),
         quantidade_maxima_ordem: int = 5,
     ) -> None:
@@ -149,10 +173,13 @@ class AgenteFundamentalista(AgenteBase):
             raise ValueError("valor_fundamental deve ser positivo.")
         if custo_informacao < 0:
             raise ValueError("custo_informacao não pode ser negativo.")
+        if not Decimal("0") < fracao_ajuste_fundamentalista <= Decimal("1"):
+            raise ValueError("fracao_ajuste_fundamentalista deve estar entre zero e um.")
         self.valor_fundamental = valor_fundamental
         self.custo_informacao = custo_informacao
         self.tolerancia = tolerancia
         self.passo_quantidade = passo_quantidade
+        self.fracao_ajuste_fundamentalista = fracao_ajuste_fundamentalista
 
     def pagar_custo_informacao(self) -> None:
         self.investidor.carteira.caixa = max(
@@ -167,6 +194,11 @@ class AgenteFundamentalista(AgenteBase):
         quantidade = int(abs(diferenca) // self.passo_quantidade) + 1
         return (LadoOrdem.COMPRA if diferenca > 0 else LadoOrdem.VENDA, quantidade)
 
+    def calcular_preco_limite(self, lado, ativo, preco_atual, historico_precos):
+        diferenca = self.valor_fundamental - preco_atual
+        preco = preco_atual + self.fracao_ajuste_fundamentalista * diferenca
+        return self._arredondar_preco(preco, ativo)
+
 
 class AgenteChartista(AgenteBase):
     tipo = "chartista"
@@ -179,6 +211,7 @@ class AgenteChartista(AgenteBase):
         quantidade_ativo: int = 0,
         janela: int = 3,
         sensibilidade: Decimal = Decimal("1.00"),
+        limite_relativo_ajuste_preco: Decimal = Decimal("0.05"),
         probabilidade_inicial: Decimal = Decimal("1.00"),
         probabilidade_reversao: Decimal = Decimal("0.50"),
         quantidade_sem_tendencia: int = 1,
@@ -192,12 +225,15 @@ class AgenteChartista(AgenteBase):
             raise ValueError("quantidade_sem_tendencia deve ser pelo menos 1.")
         if janela < 2:
             raise ValueError("janela deve ser pelo menos 2.")
+        if not Decimal("0") < limite_relativo_ajuste_preco <= Decimal("1"):
+            raise ValueError("limite_relativo_ajuste_preco deve estar entre zero e um.")
         if not Decimal("0") <= probabilidade_inicial <= Decimal("1"):
             raise ValueError("probabilidade_inicial deve estar entre zero e um.")
         if not Decimal("0") <= probabilidade_reversao <= Decimal("1"):
             raise ValueError("probabilidade_reversao deve estar entre zero e um.")
         self.janela = janela
         self.sensibilidade = sensibilidade
+        self.limite_relativo_ajuste_preco = limite_relativo_ajuste_preco
         self.probabilidade_inicial = probabilidade_inicial
         self.probabilidade_reversao = probabilidade_reversao
         self.quantidade_sem_tendencia = quantidade_sem_tendencia
@@ -208,8 +244,7 @@ class AgenteChartista(AgenteBase):
                 return None
             lado = LadoOrdem.COMPRA if rng.random() < 0.5 else LadoOrdem.VENDA
             return lado, self.quantidade_sem_tendencia
-        inicio = historico_precos[-self.janela] if len(historico_precos) >= self.janela else historico_precos[0]
-        tendencia = preco_atual - inicio
+        tendencia = self._calcular_tendencia(preco_atual, historico_precos)
         if tendencia == 0:
             lado = LadoOrdem.COMPRA if rng.random() < 0.5 else LadoOrdem.VENDA
             return lado, self.quantidade_sem_tendencia
@@ -217,3 +252,31 @@ class AgenteChartista(AgenteBase):
             tendencia = -tendencia
         quantidade = int(abs(tendencia) * self.sensibilidade) + 1
         return (LadoOrdem.COMPRA if tendencia > 0 else LadoOrdem.VENDA, quantidade)
+
+    def calcular_preco_limite(self, lado, ativo, preco_atual, historico_precos):
+        tendencia = self._calcular_tendencia(preco_atual, historico_precos)
+        ajuste_maximo = preco_atual * self.limite_relativo_ajuste_preco
+        ajuste = max(
+            self.ajuste_preco_limite,
+            min(abs(tendencia) * self.sensibilidade, ajuste_maximo),
+        )
+        preco = (
+            preco_atual + ajuste
+            if lado is LadoOrdem.COMPRA
+            else max(ativo.tick_size, preco_atual - ajuste)
+        )
+        return self._arredondar_preco(preco, ativo)
+
+    def _calcular_tendencia(
+        self,
+        preco_atual: Decimal,
+        historico_precos: Sequence[Decimal],
+    ) -> Decimal:
+        if len(historico_precos) < 2:
+            return Decimal("0")
+        inicio = (
+            historico_precos[-self.janela]
+            if len(historico_precos) >= self.janela
+            else historico_precos[0]
+        )
+        return preco_atual - inicio
