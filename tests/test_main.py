@@ -37,6 +37,11 @@ def test_criar_simulacao_usa_porcentagem() -> None:
     assert sum(isinstance(a, AgenteChartista) for a in simulacao.agentes) == 80
 
 
+def test_criar_simulacao_usa_validade_configurada(monkeypatch) -> None:
+    monkeypatch.setattr(main, "VALIDADE_ORDEM_TICKS", 7)
+    assert main.criar_simulacao(20).configuracao.validade_ordem_ticks == 7
+
+
 def test_imprimir_series_inclui_preco_inicial_e_variacoes(capsys) -> None:
     precos = [Decimal("4.10"), Decimal("4.15"), Decimal("4.12")]
 
@@ -107,8 +112,8 @@ def test_main_imprime_series_e_mostra_grafico_de_precos(tmp_path, monkeypatch, c
         assert int(atual[0]) == indice
         assert Decimal(atual[2]) == Decimal(atual[1]) - Decimal(anterior[1])
     assert "Estatísticas dos retornos logarítmicos:" in saida
-    assert "Variância populacional:" in saida
-    assert "Curtose convencional (normal = 3):" in saida
+    assert "Variância:" in saida
+    assert "Curtose:" in saida
     assert list(tmp_path.iterdir()) == []
     assert len(graficos) == 1
     assert len(graficos[0].axes) == 1

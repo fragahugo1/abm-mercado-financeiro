@@ -10,17 +10,20 @@ from mercadolab.api.simulacao import Simulacao
 from mercadolab.api.tempo import Tempo
 from mercadolab.api.transacao import Transacao
 
-from .agents import AgenteBase, AgenteFundamentalista
+from .agents import AgenteBase
 
 
 @dataclass(frozen=True)
 class ConfiguracaoSimulacao:
     quantidade_ticks: int
     semente: int
+    validade_ordem_ticks: int = 50
 
     def __post_init__(self) -> None:
         if self.quantidade_ticks <= 0:
             raise ValueError("quantidade_ticks deve ser positivo.")
+        if self.validade_ordem_ticks < 1:
+            raise ValueError("validade_ordem_ticks deve ser pelo menos 1.")
 
 
 class SimulacaoMercadoArtificial:
@@ -54,9 +57,11 @@ class SimulacaoMercadoArtificial:
 
     def executar_tick(self) -> tuple[Transacao, ...]:
         tempo = self.simulacao.tempo_atual
-        for agente in self.agentes:
-            if isinstance(agente, AgenteFundamentalista):
-                agente.pagar_custo_informacao()
+        livro = self.mercado.obter_livro(self.ativo.ticker)
+        for ordem in livro.listar_ordens_compra() + livro.listar_ordens_venda():
+            if tempo.tick - ordem.tempo.tick >= self.configuracao.validade_ordem_ticks:
+                ordem.expirar()
+                livro.remover_ordem(ordem)
         ordens = [
             ordem
             for agente in self.agentes

@@ -13,7 +13,7 @@ from .simulation import ConfiguracaoSimulacao, SimulacaoMercadoArtificial
 
 # ===== Simulação =====
 QUANTIDADE_TICKS = 1000  # quantos ticks (rodadas de negociação) a simulação executa
-SEMENTE_POPULACAO = 30  # reproduz o sorteio dos agentes (saldo, ações, parâmetros)
+SEMENTE_POPULACAO = 50  # reproduz o sorteio dos agentes (saldo, ações, parâmetros)
 SEMENTE_SIMULACAO = 50  # reproduz os sorteios durante os ticks (decisões e ordem das ordens)
 
 # ===== Saída =====
@@ -36,13 +36,12 @@ ACOES_MAXIMAS = 20  # ações iniciais máximas sorteadas por agente
 # ===== Ordens (todos os agentes) =====
 AJUSTE_PRECO_LIMITE = Decimal("0.01")  # compra oferta preço atual + ajuste; venda, preço atual - ajuste
 QUANTIDADE_MAXIMA_ORDEM = 5  # teto de ações por ordem; limita quanto o preço mexe por tick
+VALIDADE_ORDEM_TICKS = 50  # inclui o tick de emissão; expira antes de emissão + validade
 
 # ===== Fundamentalistas =====
 FRACAO_AJUSTE_FUNDAMENTALISTA = Decimal("0.10")  # fração da diferença até o valor fundamental incorporada na oferta
 VALOR_FUNDAMENTAL_MINIMO = Decimal("3.80")  # menor preço "justo" sorteado
 VALOR_FUNDAMENTAL_MAXIMO = Decimal("4.40")  # maior preço "justo" sorteado
-CUSTO_INFORMACAO_MINIMO = Decimal("0.05")  # menor custo de informação pago por tick
-CUSTO_INFORMACAO_MAXIMO = Decimal("0.15")  # maior custo de informação pago por tick
 TOLERANCIA_FUNDAMENTALISTA = Decimal("0.05")  # só negocia se |valor justo - preço| for pelo menos isso
 PASSO_QUANTIDADE_FUNDAMENTALISTA = Decimal("2")  # a cada esse valor de diferença, +1 ação na ordem
 
@@ -72,12 +71,6 @@ def criar_agentes(
                 int(VALOR_FUNDAMENTAL_MAXIMO * 100),
             )
         ) / Decimal("100")
-        custo_informacao = Decimal(
-            rng.randint(
-                int(CUSTO_INFORMACAO_MINIMO * 100),
-                int(CUSTO_INFORMACAO_MAXIMO * 100),
-            )
-        ) / Decimal("100")
         agentes.append(
             AgenteFundamentalista(
                 id=indice,
@@ -85,7 +78,6 @@ def criar_agentes(
                 saldo=Decimal(rng.randint(SALDO_MINIMO, SALDO_MAXIMO)),
                 valor_fundamental=valor_fundamental,
                 quantidade_ativo=rng.randint(ACOES_MINIMAS, ACOES_MAXIMAS),
-                custo_informacao=custo_informacao,
                 tolerancia=TOLERANCIA_FUNDAMENTALISTA,
                 passo_quantidade=PASSO_QUANTIDADE_FUNDAMENTALISTA,
                 fracao_ajuste_fundamentalista=FRACAO_AJUSTE_FUNDAMENTALISTA,
@@ -149,6 +141,7 @@ def criar_simulacao(p: int) -> SimulacaoMercadoArtificial:
         configuracao=ConfiguracaoSimulacao(
             quantidade_ticks=QUANTIDADE_TICKS,
             semente=SEMENTE_SIMULACAO,
+            validade_ordem_ticks=VALIDADE_ORDEM_TICKS,
         ),
     )
 

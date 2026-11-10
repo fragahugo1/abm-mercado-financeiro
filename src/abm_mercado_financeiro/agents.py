@@ -155,7 +155,6 @@ class AgenteFundamentalista(AgenteBase):
         saldo: Decimal,
         valor_fundamental: Decimal,
         quantidade_ativo: int = 0,
-        custo_informacao: Decimal = Decimal("0.00"),
         tolerancia: Decimal = Decimal("0.02"),
         passo_quantidade: Decimal = Decimal("2"),
         fracao_ajuste_fundamentalista: Decimal = Decimal("0.10"),
@@ -171,21 +170,12 @@ class AgenteFundamentalista(AgenteBase):
             raise ValueError("passo_quantidade deve ser positivo.")
         if valor_fundamental <= 0:
             raise ValueError("valor_fundamental deve ser positivo.")
-        if custo_informacao < 0:
-            raise ValueError("custo_informacao não pode ser negativo.")
         if not Decimal("0") < fracao_ajuste_fundamentalista <= Decimal("1"):
             raise ValueError("fracao_ajuste_fundamentalista deve estar entre zero e um.")
         self.valor_fundamental = valor_fundamental
-        self.custo_informacao = custo_informacao
         self.tolerancia = tolerancia
         self.passo_quantidade = passo_quantidade
         self.fracao_ajuste_fundamentalista = fracao_ajuste_fundamentalista
-
-    def pagar_custo_informacao(self) -> None:
-        self.investidor.carteira.caixa = max(
-            Decimal("0"),
-            self.saldo - self.custo_informacao,
-        )
 
     def decidir_lado(self, preco_atual, historico_precos, rng):
         diferenca = self.valor_fundamental - preco_atual
