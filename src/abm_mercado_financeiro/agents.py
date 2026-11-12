@@ -49,6 +49,9 @@ class AgenteBase(ABC):
         self.investidor.carteira.caixa = saldo
         self._quantidade_ativo_inicial = quantidade_ativo
         self.transacoes_iniciadas = 0
+        self._quantidade_ativo_sem_restricao = quantidade_ativo
+        self._usar_posicao_sem_restricao = False
+        self._restringir_recursos = True
 
     @property
     def saldo(self) -> Decimal:
@@ -56,6 +59,8 @@ class AgenteBase(ABC):
 
     @property
     def quantidade_ativo(self) -> int:
+        if self._usar_posicao_sem_restricao:
+            return self._quantidade_ativo_sem_restricao
         if not hasattr(self, "_ativo"):
             return 0
         posicao = self.investidor.carteira.obter_posicao(self._ativo)
@@ -94,10 +99,11 @@ class AgenteBase(ABC):
 
         lado, quantidade = decisao
         quantidade = min(quantidade, self.quantidade_maxima_ordem)
-        if lado is LadoOrdem.COMPRA:
-            quantidade = min(quantidade, int(self.saldo // preco_atual))
-        else:
-            quantidade = min(quantidade, self.quantidade_ativo)
+        if self._restringir_recursos:
+            if lado is LadoOrdem.COMPRA:
+                quantidade = min(quantidade, int(self.saldo // preco_atual))
+            else:
+                quantidade = min(quantidade, self.quantidade_ativo)
         if quantidade <= 0:
             return None
 
@@ -270,3 +276,41 @@ class AgenteChartista(AgenteBase):
             else historico_precos[0]
         )
         return preco_atual - inicio
+
+
+class AgenteRuidoso(AgenteBase):
+    """Agente que escolhe o lado aleatoriamente e posiciona ordem em torno do preço atual."""
+
+    tipo = "ruidoso"
+
+    def __init__(
+        self,
+        id: int,
+        nome: str,
+        saldo: Decimal,
+        amplitude_preco: Decimal,
+        quantidade_ordem: int = 2,
+        quantidade_ativo: int = 0,
+        ajuste_preco_limite: Decimal = Decimal("0.01"),
+        quantidade_maxima_ordem: int = 5,
+    ) -> None:
+        super().__init__(
+            id, nome, saldo, quantidade_ativo, ajuste_preco_limite, quantidade_maxima_ordem
+        )
+        if not Decimal("0") <= amplitude_preco < Decimal("1"):
+            raise ValueError("amplitude_preco deve estar entre zero e um.")
+        if quantidade_ordem < 1:
+            raise ValueError("quantidade_ordem deve ser pelo menos 1.")
+        self.amplitude_preco = amplitude_preco
+        self.quantidade_ordem = quantidade_ordem
+        self._variacao_preco = Decimal("0")
+
+    def decidir_lado(self, preco_atual, historico_precos, rng):
+        lado = LadoOrdem.COMPRA if rng.random() < 0.5 else LadoOrdem.VENDA
+        variacao = rng.uniform(-float(self.amplitude_preco), float(self.amplitude_preco))
+        self._variacao_preco = Decimal(str(variacao))
+        return lado, self.quantidade_ordem
+
+    def calcular_preco_limite(self, lado, ativo, preco_atual, historico_precos):
+        preco = preco_atual * (Decimal("1") + self._variacao_preco)
+        return self._arredondar_preco(max(ativo.tick_size, preco), ativo)

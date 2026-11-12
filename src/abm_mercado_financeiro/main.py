@@ -6,15 +6,15 @@ from random import Random
 import matplotlib.pyplot as plt
 from mercadolab.api.ativo import Ativo, TipoAtivo
 
-from .agents import AgenteChartista, AgenteFundamentalista
+from .agents import AgenteChartista, AgenteFundamentalista, AgenteRuidoso
 from .simulation import ConfiguracaoSimulacao, SimulacaoMercadoArtificial
 
 # ===== Configurações Gerais - Constantes Flexíveis =====
 
 # ===== Simulação =====
 QUANTIDADE_TICKS = 1000  # quantos ticks (rodadas de negociação) a simulação executa
-SEMENTE_POPULACAO = 50  # reproduz o sorteio dos agentes (saldo, ações, parâmetros)
-SEMENTE_SIMULACAO = 50  # reproduz os sorteios durante os ticks (decisões e ordem das ordens)
+SEMENTE_POPULACAO = 30  # reproduz o sorteio dos agentes (saldo, ações, parâmetros)
+SEMENTE_SIMULACAO = 30  # reproduz os sorteios durante os ticks (decisões e ordem das ordens)
 
 # ===== Saída =====
 MOSTRAR_GRAFICO = True  # abre o gráfico de preços ao final
@@ -24,12 +24,12 @@ TICKER = "ACAO"  # código do ativo no mercado
 NOME_ATIVO = "Acao Artificial"  # nome descritivo do ativo
 MOEDA = "BRL"  # moeda de negociação
 TICK_SIZE = Decimal("0.01")  # menor variação de preço permitida
-PRECO_INICIAL = Decimal("4.10")  # preço antes do primeiro tick; múltiplo do TICK_SIZE
+PRECO_INICIAL = Decimal("100")  # preço antes do primeiro tick; múltiplo do TICK_SIZE
 
 # ===== População =====
-QUANTIDADE_AGENTES = 100  # número total de agentes
-SALDO_MINIMO = 80  # caixa inicial mínimo sorteado por agente
-SALDO_MAXIMO = 120  # caixa inicial máximo sorteado por agente
+QUANTIDADE_AGENTES = 150  # número total de agentes
+SALDO_MINIMO = 8000  # caixa inicial mínimo sorteado por agente
+SALDO_MAXIMO = 12000  # caixa inicial máximo sorteado por agente
 ACOES_MINIMAS = 5  # ações iniciais mínimas sorteadas por agente
 ACOES_MAXIMAS = 20  # ações iniciais máximas sorteadas por agente
 
@@ -37,31 +37,45 @@ ACOES_MAXIMAS = 20  # ações iniciais máximas sorteadas por agente
 AJUSTE_PRECO_LIMITE = Decimal("0.01")  # compra oferta preço atual + ajuste; venda, preço atual - ajuste
 QUANTIDADE_MAXIMA_ORDEM = 5  # teto de ações por ordem; limita quanto o preço mexe por tick
 VALIDADE_ORDEM_TICKS = 50  # inclui o tick de emissão; expira antes de emissão + validade
+RESTRINGIR_RECURSOS = True  # False permite caixa negativo e venda a descoberto (experimento)
+MECANISMO_PRECO = "ponto_medio"  # ultimo_negocio, ponto_medio ou lote_aquecimento
+TICKS_AQUECIMENTO = 20
+DESVIO_PRECO_AQUECIMENTO = Decimal("0.01")
+TAMANHO_LOTE_ABERTURA = 40
 
 # ===== Fundamentalistas =====
 FRACAO_AJUSTE_FUNDAMENTALISTA = Decimal("0.10")  # fração da diferença até o valor fundamental incorporada na oferta
-VALOR_FUNDAMENTAL_MINIMO = Decimal("3.80")  # menor preço "justo" sorteado
-VALOR_FUNDAMENTAL_MAXIMO = Decimal("4.40")  # maior preço "justo" sorteado
-TOLERANCIA_FUNDAMENTALISTA = Decimal("0.05")  # só negocia se |valor justo - preço| for pelo menos isso
-PASSO_QUANTIDADE_FUNDAMENTALISTA = Decimal("2")  # a cada esse valor de diferença, +1 ação na ordem
+VALOR_FUNDAMENTAL_MINIMO = Decimal("90")  # menor preço "justo" sorteado
+VALOR_FUNDAMENTAL_MAXIMO = Decimal("110")  # maior preço "justo" sorteado
+TOLERANCIA_FUNDAMENTALISTA = Decimal("1.25")  # só negocia se |valor justo - preço| for pelo menos isso
+PASSO_QUANTIDADE_FUNDAMENTALISTA = Decimal("48.8")  # a cada esse valor de diferença, +1 ação na ordem
 
 # ===== Chartistas =====
 LIMITE_RELATIVO_AJUSTE_CHARTISTA = Decimal("0.05")  # ajuste de preço limitado a 5% do preço atual
-JANELA_MINIMA = 2  # menor número de ticks passados usados para medir a tendência (mínimo 2)
-JANELA_MAXIMA = 5  # maior número de ticks passados usados para medir a tendência
+JANELA_MINIMA = 10  # menor número de ticks passados usados para medir a tendência (mínimo 2)
+JANELA_MAXIMA = 30  # maior número de ticks passados usados para medir a tendência
 SENSIBILIDADES = (Decimal("0.50"), Decimal("1.00"), Decimal("1.50"))  # opções: quanto a tendência aumenta a quantidade
 PROBABILIDADES_INICIAIS = (Decimal("0.50"), Decimal("0.75"), Decimal("1.00"))  # opções: chance de agir no 1º tick, sem histórico
 PROBABILIDADES_REVERSAO = (Decimal("0.25"), Decimal("0.50"), Decimal("0.75"))  # opções: chance de agir contra a tendência
 QUANTIDADE_SEM_TENDENCIA = 1  # ações negociadas quando não há tendência (lado sorteado)
 
+# ===== Ruidosos =====
+AMPLITUDE_PRECO_RUIDO = Decimal("0.05")  # preço limite varia até 5% do preço atual
+QUANTIDADE_ORDEM_RUIDO = 2
+
 def criar_agentes(
     quantidade_fundamentalistas: int,
     quantidade_chartistas: int,
-) -> list[AgenteFundamentalista | AgenteChartista]:
-    if quantidade_fundamentalistas < 1 or quantidade_chartistas < 1:
-        raise ValueError("Configure pelo menos um agente de cada estratégia.")
+    quantidade_ruidosos: int = 0,
+) -> list[AgenteFundamentalista | AgenteChartista | AgenteRuidoso]:
+    if (
+        quantidade_fundamentalistas < 1
+        or quantidade_chartistas < 1
+        or quantidade_ruidosos < 0
+    ):
+        raise ValueError("Configure pelo menos um agente fundamentalista e chartista.")
 
-    agentes: list[AgenteFundamentalista | AgenteChartista] = []
+    agentes: list[AgenteFundamentalista | AgenteChartista | AgenteRuidoso] = []
     rng = Random(SEMENTE_POPULACAO)
 
     for indice in range(quantidade_fundamentalistas):
@@ -105,6 +119,22 @@ def criar_agentes(
             )
         )
 
+    rng_ruidosos = Random(f"ruidosos-{SEMENTE_POPULACAO}")
+    primeiro_id_ruidoso = quantidade_fundamentalistas + quantidade_chartistas
+    for indice in range(quantidade_ruidosos):
+        agentes.append(
+            AgenteRuidoso(
+                id=primeiro_id_ruidoso + indice,
+                nome=f"Agente Ruidoso {indice + 1}",
+                saldo=Decimal(rng_ruidosos.randint(SALDO_MINIMO, SALDO_MAXIMO)),
+                quantidade_ativo=rng_ruidosos.randint(ACOES_MINIMAS, ACOES_MAXIMAS),
+                amplitude_preco=AMPLITUDE_PRECO_RUIDO,
+                quantidade_ordem=QUANTIDADE_ORDEM_RUIDO,
+                ajuste_preco_limite=AJUSTE_PRECO_LIMITE,
+                quantidade_maxima_ordem=QUANTIDADE_MAXIMA_ORDEM,
+            )
+        )
+
     return agentes
 
 
@@ -121,8 +151,24 @@ def calcular_quantidades(p: int) -> tuple[int, int]:
     return fundamentalistas, chartistas
 
 
-def criar_simulacao(p: int) -> SimulacaoMercadoArtificial:
-    fundamentalistas, chartistas = calcular_quantidades(p)
+def calcular_composicao(p: int, p_ruido: int) -> tuple[int, int, int]:
+    if not 1 <= p <= 99:
+        raise ValueError("p deve ser uma porcentagem inteira entre 1 e 99.")
+    if not 0 <= p_ruido <= 99:
+        raise ValueError("p_ruido deve ser uma porcentagem inteira entre 0 e 99.")
+
+    fundamentalistas, _ = calcular_quantidades(p)
+    ruidosos = (QUANTIDADE_AGENTES * p_ruido + 50) // 100
+    chartistas = QUANTIDADE_AGENTES - fundamentalistas - ruidosos
+    if chartistas < 1:
+        raise ValueError(
+            "A composição deve resultar em pelo menos um agente chartista."
+        )
+    return fundamentalistas, chartistas, ruidosos
+
+
+def criar_simulacao(p: int, p_ruido: int = 0) -> SimulacaoMercadoArtificial:
+    fundamentalistas, chartistas, ruidosos = calcular_composicao(p, p_ruido)
     ativo = Ativo(
         ticker=TICKER,
         tipo=TipoAtivo.ACAO,
@@ -133,6 +179,7 @@ def criar_simulacao(p: int) -> SimulacaoMercadoArtificial:
     agentes = criar_agentes(
         quantidade_fundamentalistas=fundamentalistas,
         quantidade_chartistas=chartistas,
+        quantidade_ruidosos=ruidosos,
     )
     return SimulacaoMercadoArtificial(
         ativo=ativo,
@@ -142,6 +189,12 @@ def criar_simulacao(p: int) -> SimulacaoMercadoArtificial:
             quantidade_ticks=QUANTIDADE_TICKS,
             semente=SEMENTE_SIMULACAO,
             validade_ordem_ticks=VALIDADE_ORDEM_TICKS,
+            restringir_recursos=RESTRINGIR_RECURSOS,
+            mecanismo_preco=MECANISMO_PRECO,
+            semente_populacao=SEMENTE_POPULACAO,
+            ticks_aquecimento=TICKS_AQUECIMENTO,
+            desvio_aquecimento=DESVIO_PRECO_AQUECIMENTO,
+            tamanho_lote=TAMANHO_LOTE_ABERTURA,
         ),
     )
 
@@ -206,16 +259,26 @@ def mostrar_grafico_precos(precos: list[Decimal]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simula um mercado financeiro artificial.")
     parser.add_argument("--p", type=int, required=True, help="porcentagem inteira de fundamentalistas")
+    parser.add_argument(
+        "--p-ruido",
+        type=int,
+        required=True,
+        help="porcentagem inteira de agentes ruidosos; chartistas ficam com o restante",
+    )
     argumentos = parser.parse_args()
     try:
-        fundamentalistas, chartistas = calcular_quantidades(argumentos.p)
+        fundamentalistas, chartistas, ruidosos = calcular_composicao(
+            argumentos.p, argumentos.p_ruido
+        )
     except ValueError as erro:
         parser.error(str(erro))
 
-    simulacao = criar_simulacao(argumentos.p)
+    simulacao = criar_simulacao(argumentos.p, argumentos.p_ruido)
     print(
         f"Agentes: {fundamentalistas} fundamentalistas "
-        f"({fundamentalistas / QUANTIDADE_AGENTES:.2%}) e {chartistas} chartistas."
+        f"({fundamentalistas / QUANTIDADE_AGENTES:.2%}), "
+        f"{ruidosos} ruidosos ({ruidosos / QUANTIDADE_AGENTES:.2%}) e "
+        f"{chartistas} chartistas ({chartistas / QUANTIDADE_AGENTES:.2%})."
     )
     for _ in range(simulacao.configuracao.quantidade_ticks):
         simulacao.executar_tick()

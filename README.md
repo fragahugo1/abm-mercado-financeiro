@@ -1,7 +1,8 @@
 # Mercado financeiro artificial
 
-Simulação de um mercado artificial com agentes fundamentalistas e chartistas.
-O projeto usa Python e a biblioteca MercadoLab como motor de negociação.
+Simulação de um mercado artificial com agentes fundamentalistas, chartistas e
+e de ruídos. O projeto usa Python e a biblioteca MercadoLab como motor de
+negociação.
 
 ## Requisitos
 
@@ -21,21 +22,23 @@ python -m pip install -e .
 
 ## Executar a simulação
 
-Informe `--p` como uma porcentagem inteira de agentes fundamentalistas. Por
-exemplo:
+Informe `--p` como a porcentagem inteira de fundamentalistas e `--p-ruido`
+como a porcentagem inteira de agentes ruidosos. Os chartistas recebem a
+porcentagem restante. Por exemplo, para testar a composição 36%/33%/31%:
 
 ```powershell
-abm-mercado-financeiro --p 20
+abm-mercado-financeiro --p 36 --p-ruido 33
 ```
 
-Com as configurações padrão, a simulação executa 1.000 ticks e cria 100 agentes:
-20 fundamentalistas e 80 chartistas. São necessários pelo menos um agente de
-cada estratégia; por isso, com 100 agentes, `p` deve estar entre 1 e 99.
+Com as constantes padrão, a simulação executa 1000 ticks e cria 150 agentes.
+Os percentuais são convertidos em quantidades inteiras por arredondamento; é
+necessário haver pelo menos um fundamentalista e um chartista. Os chartistas
+representam o restante depois de contabilizados os outros dois grupos.
 
 
 ## Saídas e cálculos
 
-- **Preço inicial:** R$ 4,10, mostrado antes do tick 0.
+- **Preço inicial:** R$ 100,00, mostrado antes do tick 0.
 - **Variação:** preço atual menos o preço anterior, em reais. Para 1.000 ticks,
   são mostrados 1.001 preços e 1.000 variações.
 - **Retorno logarítmico:** `ln(preço atual / preço anterior)`.
@@ -46,18 +49,27 @@ Cada tick representa uma rodada da simulação.
 ## Parâmetros técnicos
 
 As configurações avançadas e as sementes estão em
-[main.py](src/abm_mercado_financeiro/main.py). Por padrão, os valores sorteados
-para os fundamentalistas variam entre R$ 3,80 e R$ 4,40. Na formação dos preços
-das ordens:
+[main.py](src/abm_mercado_financeiro/main.py). Os valores fundamentais são
+sorteados entre R$ 90 e R$ 110. A composição padrão do experimento pode ser
+informada com `--p 36 --p-ruido 33`. Na formação dos preços das ordens:
 
 - fundamentalistas incorporam 10% da diferença entre o preço atual e seu valor
   fundamental;
 - chartistas ajustam suas ofertas conforme a tendência e sua sensibilidade,
   limitando o ajuste a 5% do preço atual;
+- ruidosos escolhem aleatoriamente o lado e um preço-limite numa faixa de 5%
+  em torno do preço atual;
 - os preços das ordens respeitam o tick size configurado.
 
-Esses valores são parâmetros do modelo e podem ser alterados para experimentos.
-Os resultados podem mudar ao alterar parâmetros, sementes ou a porcentagem `p`.
+O mecanismo de preço é selecionado pela constante `MECANISMO_PRECO`: `ultimo_negocio`,
+`ponto_medio` ou `lote_aquecimento`. As ordens expiram após o prazo configurado
+em `VALIDADE_ORDEM_TICKS`. Por padrão, caixa e posições não podem ficar
+negativos; `RESTRINGIR_RECURSOS = False` habilita a variante experimental com
+caixa negativo e venda a descoberto.
+
+As sementes fixas tornam a execução reproduzível com a mesma configuração.
+Parâmetros, sementes e percentuais podem ser alterados para experimentos; a
+rotina de calibração histórica do notebook não está incluída na aplicação.
 
 ## Testes 
 

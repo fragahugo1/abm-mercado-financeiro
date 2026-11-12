@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "abm-mercado-financeiro"
 version = "0.1.0"
-description = "Mercado artificial com agentes fundamentalistas e chartistas."
+description = "Mercado artificial com agentes fundamentalistas, chartistas e de ruído."
 requires-python = ">=3.11"
 dependencies = [
     "mercadolab @ git+https://github.com/Hargenx/mercadolab.git",

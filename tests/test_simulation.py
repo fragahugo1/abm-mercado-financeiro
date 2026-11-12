@@ -3,7 +3,11 @@ from random import Random
 
 import pytest
 
-from abm_mercado_financeiro.agents import AgenteChartista, AgenteFundamentalista
+from abm_mercado_financeiro.agents import (
+    AgenteChartista,
+    AgenteFundamentalista,
+    AgenteRuidoso,
+)
 from abm_mercado_financeiro.main import criar_agentes, criar_simulacao as criar_simulacao_padrao
 from abm_mercado_financeiro.simulation import ConfiguracaoSimulacao, SimulacaoMercadoArtificial
 from mercadolab.api.ativo import Ativo, TipoAtivo
@@ -11,14 +15,20 @@ from mercadolab.api.ordem import LadoOrdem, StatusOrdem, TipoOrdem
 from mercadolab.api.tempo import Tempo
 
 
-def criar_simulacao(semente: int = 42) -> SimulacaoMercadoArtificial:
+def criar_simulacao(
+    semente: int = 42,
+    configuracao: ConfiguracaoSimulacao | None = None,
+) -> SimulacaoMercadoArtificial:
     ativo = Ativo(ticker="TEST", tipo=TipoAtivo.ACAO)
     agentes = [
         AgenteFundamentalista(0, "Fundamentalista", Decimal("100"), Decimal("40"), 5),
         AgenteChartista(1, "Chartista", Decimal("100"), 5),
     ]
     return SimulacaoMercadoArtificial(
-        ativo, Decimal("42"), agentes, ConfiguracaoSimulacao(10, semente, 50)
+        ativo,
+        Decimal("42"),
+        agentes,
+        configuracao or ConfiguracaoSimulacao(10, semente, 50),
     )
 
 
@@ -53,16 +63,21 @@ def test_configuracao_rejeita_validade_nao_positiva(validade: int) -> None:
         ConfiguracaoSimulacao(10, 42, validade)
 
 
-@pytest.mark.parametrize(("validade", "tick_venda", "negocia"), [
-    (50, 49, True),
-    (50, 50, False),
-    (1, 1, False),
-])
+@pytest.mark.parametrize(
+    ("mecanismo", "validade", "tick_venda", "negocia"),
+    [
+        (mecanismo, validade, tick_venda, negocia)
+        for mecanismo in ("ultimo_negocio", "ponto_medio", "lote_aquecimento")
+        for validade, tick_venda, negocia in ((50, 49, True), (50, 50, False), (1, 1, False))
+    ],
+)
 def test_ordem_expira_antes_da_negociacao_no_tick_limite(
-    validade: int, tick_venda: int, negocia: bool, monkeypatch
+    mecanismo: str, validade: int, tick_venda: int, negocia: bool, monkeypatch
 ) -> None:
     simulacao = criar_simulacao()
-    simulacao.configuracao = ConfiguracaoSimulacao(100, 42, validade)
+    simulacao.configuracao = ConfiguracaoSimulacao(
+        100, 42, validade, mecanismo_preco=mecanismo, ticks_aquecimento=0
+    )
     comprador, vendedor = simulacao.agentes
     compra = comprador.investidor.emitir_ordem(
         simulacao.ativo, LadoOrdem.COMPRA, TipoOrdem.LIMITADA, 1,
@@ -206,6 +221,142 @@ def test_ordem_respeita_quantidade_maxima_configurada() -> None:
     assert ordem is not None
     assert ordem.quantidade == 2
     assert ordem.preco_limite == Decimal("7.60")
+
+
+def test_agente_ruidoso_emite_ordem_limitada_com_preco_na_amplitude() -> None:
+    ativo = Ativo(ticker="RUIDO", tipo=TipoAtivo.ACAO)
+    agente = AgenteRuidoso(
+        0,
+        "Ruidoso",
+        Decimal("1000"),
+        amplitude_preco=Decimal("0.05"),
+        quantidade_ordem=2,
+        quantidade_ativo=5,
+    )
+    agente.vincular_ativo(ativo)
+
+    ordem = agente.gerar_ordem(
+        ativo, Tempo(tick=0), Decimal("42"), [Decimal("42")], Random(7)
+    )
+
+    assert ordem is not None
+    assert ordem.quantidade == 2
+    assert Decimal("39.90") <= ordem.preco_limite <= Decimal("44.10")
+    assert ordem.tipo is TipoOrdem.LIMITADA
+
+
+@pytest.mark.parametrize(
+    ("mecanismo", "ticks_aquecimento"),
+    [("ultimo_negocio", 0), ("ponto_medio", 0), ("lote_aquecimento", 0)],
+)
+def test_mecanismos_de_preco_executam_ordens_cruzadas(
+    mecanismo: str, ticks_aquecimento: int, monkeypatch
+) -> None:
+    simulacao = criar_simulacao()
+    simulacao.configuracao = ConfiguracaoSimulacao(
+        1,
+        42,
+        mecanismo_preco=mecanismo,
+        ticks_aquecimento=ticks_aquecimento,
+        tamanho_lote=2,
+    )
+    comprador, vendedor = simulacao.agentes
+
+    def gerar_ordem(lado, preco, agente):
+        return lambda ativo, tempo, *args: agente.investidor.emitir_ordem(
+            ativo,
+            lado,
+            TipoOrdem.LIMITADA,
+            1,
+            tempo,
+            preco,
+        )
+
+    monkeypatch.setattr(
+        comprador,
+        "gerar_ordem",
+        gerar_ordem(LadoOrdem.COMPRA, Decimal("43"), comprador),
+    )
+    monkeypatch.setattr(
+        vendedor,
+        "gerar_ordem",
+        gerar_ordem(LadoOrdem.VENDA, Decimal("40"), vendedor),
+    )
+
+    transacoes = simulacao.executar_tick()
+
+    assert len(transacoes) == 1
+    assert simulacao.simulacao.tempo_atual.tick == 1
+    if mecanismo == "ponto_medio":
+        assert simulacao.preco_atual == Decimal("41.50")
+    else:
+        assert simulacao.preco_atual in (Decimal("40"), Decimal("43"))
+
+
+def test_lote_aquecimento_usa_ordens_de_aquecimento_antes_dos_agentes(monkeypatch) -> None:
+    simulacao = criar_simulacao_padrao(36, 33)
+    simulacao.configuracao = ConfiguracaoSimulacao(
+        1, 42, mecanismo_preco="lote_aquecimento", ticks_aquecimento=1
+    )
+
+    def falhar_se_chamado(*args):
+        raise AssertionError("gerar_ordem não deve ser chamado durante o aquecimento.")
+
+    for agente in simulacao.agentes:
+        monkeypatch.setattr(agente, "gerar_ordem", falhar_se_chamado)
+
+    simulacao.executar_tick()
+
+    assert simulacao.simulacao.tempo_atual.tick == 1
+    assert len(simulacao.historico_precos) == 2
+
+
+@pytest.mark.parametrize(
+    ("restringir_recursos", "negocia", "posicao_comprador", "posicao_vendedor"),
+    [(True, False, 0, 0), (False, True, 1, -1)],
+)
+def test_modo_sem_restricoes_permite_caixa_negativo_e_venda_a_descoberto(
+    restringir_recursos: bool,
+    negocia: bool,
+    posicao_comprador: int,
+    posicao_vendedor: int,
+    monkeypatch,
+) -> None:
+    comprador = AgenteFundamentalista(
+        0, "Comprador", Decimal("0"), Decimal("100")
+    )
+    vendedor = AgenteChartista(1, "Vendedor", Decimal("0"))
+    ativo = Ativo(ticker="TEST", tipo=TipoAtivo.ACAO)
+    simulacao = SimulacaoMercadoArtificial(
+        ativo,
+        Decimal("42"),
+        [comprador, vendedor],
+        ConfiguracaoSimulacao(
+            1, 42, restringir_recursos=restringir_recursos
+        ),
+    )
+
+    def gerar_ordem(lado, agente):
+        return lambda ativo, tempo, *args: agente.investidor.emitir_ordem(
+            ativo,
+            lado,
+            TipoOrdem.LIMITADA,
+            1,
+            tempo,
+            Decimal("42"),
+        )
+
+    monkeypatch.setattr(comprador, "gerar_ordem", gerar_ordem(LadoOrdem.COMPRA, comprador))
+    monkeypatch.setattr(vendedor, "gerar_ordem", gerar_ordem(LadoOrdem.VENDA, vendedor))
+
+    transacoes = simulacao.executar_tick()
+
+    assert bool(transacoes) is negocia
+    assert comprador.quantidade_ativo == posicao_comprador
+    assert vendedor.quantidade_ativo == posicao_vendedor
+    if negocia:
+        assert comprador.saldo == Decimal("-42")
+        assert vendedor.saldo == Decimal("42")
 
 
 def test_preco_ordem_fundamentalista_depende_da_distancia_ao_valor_justo() -> None:

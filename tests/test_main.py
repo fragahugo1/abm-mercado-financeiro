@@ -6,7 +6,11 @@ import matplotlib.pyplot as plt
 import pytest
 
 from abm_mercado_financeiro import main
-from abm_mercado_financeiro.agents import AgenteChartista, AgenteFundamentalista
+from abm_mercado_financeiro.agents import (
+    AgenteChartista,
+    AgenteFundamentalista,
+    AgenteRuidoso,
+)
 
 
 @pytest.mark.parametrize(
@@ -29,12 +33,27 @@ def test_calcular_quantidades_rejeita_configuracoes_invalidas(p: int, total: int
         main.calcular_quantidades(p)
 
 
-def test_criar_simulacao_usa_porcentagem() -> None:
-    simulacao = main.criar_simulacao(20)
+def test_criar_simulacao_usa_percentuais_de_fundamentalistas_e_ruidosos() -> None:
+    simulacao = main.criar_simulacao(20, 10)
 
-    assert len(simulacao.agentes) == 100
-    assert sum(isinstance(a, AgenteFundamentalista) for a in simulacao.agentes) == 20
-    assert sum(isinstance(a, AgenteChartista) for a in simulacao.agentes) == 80
+    assert len(simulacao.agentes) == 120
+    assert sum(isinstance(a, AgenteFundamentalista) for a in simulacao.agentes) == 24
+    assert sum(isinstance(a, AgenteRuidoso) for a in simulacao.agentes) == 12
+    assert sum(isinstance(a, AgenteChartista) for a in simulacao.agentes) == 84
+
+
+@pytest.mark.parametrize(
+    ("p", "p_ruido", "esperado"),
+    [(36, 33, (43, 37, 40)), (1, 0, (1, 119, 0)), (99, 0, (119, 1, 0))],
+)
+def test_calcular_composicao(p, p_ruido, esperado) -> None:
+    assert main.calcular_composicao(p, p_ruido) == esperado
+
+
+@pytest.mark.parametrize(("p", "p_ruido"), [(0, 0), (100, 0), (50, 100), (50, 60)])
+def test_calcular_composicao_rejeita_percentuais_invalidos(p, p_ruido) -> None:
+    with pytest.raises(ValueError):
+        main.calcular_composicao(p, p_ruido)
 
 
 def test_criar_simulacao_usa_validade_configurada(monkeypatch) -> None:
@@ -81,7 +100,16 @@ def test_estatisticas_rejeitam_precos_invalidos(precos) -> None:
         main.calcular_estatisticas_retornos(precos)
 
 
-@pytest.mark.parametrize("argumentos", [[], ["--p", "0"], ["--p", "100"], ["--p", "2.5"]])
+@pytest.mark.parametrize(
+    "argumentos",
+    [
+        [],
+        ["--p", "0", "--p-ruido", "0"],
+        ["--p", "100", "--p-ruido", "0"],
+        ["--p", "2.5", "--p-ruido", "0"],
+        ["--p", "20"],
+    ],
+)
 def test_main_rejeita_p_ausente_ou_invalido(argumentos, monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "argv", ["abm-mercado-financeiro", *argumentos])
     with pytest.raises(SystemExit) as erro:
@@ -92,7 +120,9 @@ def test_main_rejeita_p_ausente_ou_invalido(argumentos, monkeypatch, capsys) -> 
 
 def test_main_imprime_series_e_mostra_grafico_de_precos(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["abm-mercado-financeiro", "--p", "20"])
+    monkeypatch.setattr(
+        sys, "argv", ["abm-mercado-financeiro", "--p", "20", "--p-ruido", "10"]
+    )
     monkeypatch.setattr(main, "QUANTIDADE_TICKS", 3)
     graficos = []
     monkeypatch.setattr(plt, "show", lambda: graficos.append(plt.gcf()))
@@ -100,13 +130,14 @@ def test_main_imprime_series_e_mostra_grafico_de_precos(tmp_path, monkeypatch, c
     main.main()
 
     saida = capsys.readouterr().out
-    assert "20 fundamentalistas" in saida
-    assert "80 chartistas" in saida
+    assert "24 fundamentalistas" in saida
+    assert "12 ruidosos" in saida
+    assert "84 chartistas" in saida
     assert "TICK " not in saida
     partes = saida.splitlines()
     linhas = [[coluna.strip() for coluna in linha.split("|")] for linha in partes[1:6]]
     assert linhas[0] == ["Tick", "Preço", "Variação"]
-    assert linhas[1] == ["Inicial", "4.10", "-"]
+    assert linhas[1] == ["Inicial", f"{main.PRECO_INICIAL:.2f}", "-"]
     assert len(linhas) == 5
     for indice, (anterior, atual) in enumerate(zip(linhas[1:], linhas[2:])):
         assert int(atual[0]) == indice
